@@ -1,6 +1,33 @@
 # ESP32-IDF-Cheatsheet
 Cheatsheet para programar microcontroladores ESP32 con el ESP32-IDF
 
+#INDICE
+
+1. [GPIO – Entradas y Salidas](#gpio--entradas-y-salidas)
+2. [FreeRTOS – Tareas y Delays](#freertos--tareas-y-delays)
+3. [UART (Serial)](#uart-serial)
+4. [I2C (Modo Maestro)](#i2c-modo-maestro)
+5. [SPI (Modo Maestro)](#spi-modo-maestro)
+6. [ADC](#adc-conversor-analógico-digital)
+7. [DAC](#dac-conversor-digital-analógico)
+8. [PWM (LEDC)](#pwm-ledc)
+9. [Wi-Fi Modo Estación (Cliente)](#wi-fi-modo-estacion-cliente)
+10. [ESP-NOW](#esp-now)
+11. [NVS](#nvs-almacenamiento-no-volatil)
+12. [Timers por Hardware](#timers-por-hardware)
+13. [OTA / HTTPS](#ota--https)
+14. [Logs y Debug](#logs-y-debug)
+15. [Deep Sleep](#deep-sleep-modo-bajo-consumo)
+16. [RTC](#rtc-real-time-clock-y-memoria-persistente)
+17. [MQTT](#mqtt-cliente-conectado-a-broker)
+18. [Wi-Fi Access Point](#wi-fi-access-point)
+19. [Servo (usando PWM/LEDC)](#servo-usando-pwmledc)
+20. [Botones](#botones-con-debounce-por-software)
+21. [MPU 6050 Registros](#mpu-6050-registros)
+22. [Pantalla I2C 16x2](#pantalla-i2c-16x2)
+23. [FreeRTOS – Multitarea, Sensores y Deep Sleep](#parte-importante-freertos-multitarea-sensores-y-deep-sleep)
+
+
 ## GPIO – Entradas y Salidas
 
 ```c
