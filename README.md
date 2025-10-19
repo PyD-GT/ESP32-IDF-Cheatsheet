@@ -496,7 +496,7 @@ void app_main(void)
     };
     ledc_channel_config(&channel);
 
-    // 🔄 Mueve el servo entre 0° y 180°
+    // Mueve el servo entre 0° y 180°
     while (1) {
         for (int angle = 0; angle <= 180; angle += 10) {
             uint32_t duty = (angle * (3276 - 1638) / 180) + 1638; // Mapea a 1–2 ms
@@ -679,72 +679,119 @@ void app_main(void)
 ```
 # PANTALLA I2C 16X2
 ```c
-#include "driver/i2c.h"
+#include "esp_lcd_io_i2c.h"
+#include "esp_lcd_panel_io.h"
+#include "driver/i2c_master.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_log.h"
-#include <stdio.h>
-#include <string.h>
 
-#define I2C_MASTER_SCL_IO 22
-#define I2C_MASTER_SDA_IO 21
-#define I2C_MASTER_NUM    I2C_NUM_0
-#define I2C_MASTER_FREQ_HZ 100000
+// Pines y configuración
+#define I2C_SDA_PIN 11
+#define I2C_SCL_PIN 12
+#define LCD_ADDR    0x27      // o 0x3F según el módulo
+#define I2C_FREQ_HZ 50000     // Frecuencia I2C
 
-#define LCD_ADDR 0x27  // Dirección I2C del PCF8574 (varía: 0x27 o 0x3F)
+static i2c_master_bus_handle_t i2c_bus = NULL;
+static esp_lcd_panel_io_handle_t io_handle = NULL;
 
-static const char *TAG = "LCD";
-
-/* Inicializa bus I2C como master */
-void i2c_master_init(void)
+// Función base para enviar datos (modo 4 bits)
+void lcd_write(uint8_t data, uint8_t rs)
 {
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = I2C_MASTER_SDA_IO,
-        .scl_io_num = I2C_MASTER_SCL_IO,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = I2C_MASTER_FREQ_HZ,
+    uint8_t high = data & 0xF0;
+    uint8_t low  = (data << 4) & 0xF0;
+
+    uint8_t seq[4] = {
+        high | (rs ? 0x01 : 0x00) | 0x0C,
+        high | (rs ? 0x01 : 0x00) | 0x08,
+        low  | (rs ? 0x01 : 0x00) | 0x0C,
+        low  | (rs ? 0x01 : 0x00) | 0x08
     };
-    i2c_param_config(I2C_MASTER_NUM, &conf);
-    i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
+
+    esp_lcd_panel_io_tx_param(io_handle, 0, seq, sizeof(seq));
+    vTaskDelay(pdMS_TO_TICKS(2));
 }
 
-/* Enviar comando o dato a la pantalla (simplificado) */
-esp_err_t lcd_write(uint8_t data)
+void lcd_cmd(uint8_t cmd)  { lcd_write(cmd, 0); }
+void lcd_data(uint8_t data){ lcd_write(data, 1); }
+
+// Inicialización estándar del LCD
+void lcd_init()
 {
-    return i2c_master_write_to_device(I2C_MASTER_NUM, LCD_ADDR, &data, 1, pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(100));
+    lcd_write(0x30, 0); vTaskDelay(pdMS_TO_TICKS(10));
+    lcd_write(0x30, 0); vTaskDelay(pdMS_TO_TICKS(10));
+    lcd_write(0x20, 0); vTaskDelay(pdMS_TO_TICKS(10));
+
+    lcd_cmd(0x28); // 4 bits, 2 líneas
+    lcd_cmd(0x0C); // Display ON
+    lcd_cmd(0x06); // Incrementar cursor
+    lcd_cmd(0x01); // Limpiar
+    vTaskDelay(pdMS_TO_TICKS(10));
 }
 
-/* Inicializa LCD (modo 4 bits) */
-void lcd_init(void)
+// Posicionar cursor
+void lcd_set_cursor(uint8_t col, uint8_t row)
 {
-    vTaskDelay(pdMS_TO_TICKS(50)); // Espera power-up
-    lcd_write(0x33); // Inicialización
-    lcd_write(0x32); // Modo 4 bits
-    lcd_write(0x28); // 2 líneas, 5x8 puntos
-    lcd_write(0x0C); // Display ON, cursor OFF
-    lcd_write(0x06); // Auto-incrementa cursor
-    lcd_write(0x01); // Limpia pantalla
+    static const uint8_t offsets[] = {0x00, 0x40};
+    lcd_cmd(0x80 | (col + offsets[row]));
 }
 
-/* Escribe un mensaje simple */
-void lcd_print(const char* msg)
+// Imprimir texto
+void lcd_print(const char *msg)
 {
-    for (size_t i = 0; i < strlen(msg); i++) {
-        lcd_write(msg[i]); // Envía cada carácter
-    }
+    while (*msg)
+        lcd_data(*msg++);
 }
 
-/* app_main: ejemplo completo */
+// Configuración I2C y LCD
+void lcd_begin(void)
+{
+    i2c_master_bus_config_t bus_cfg = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .i2c_port = I2C_NUM_0,
+        .sda_io_num = I2C_SDA_PIN,
+        .scl_io_num = I2C_SCL_PIN,
+        .flags.enable_internal_pullup = true,
+    };
+    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &i2c_bus));
+
+    esp_lcd_panel_io_i2c_config_t io_cfg = {
+        .dev_addr = LCD_ADDR,
+        .scl_speed_hz = I2C_FREQ_HZ,
+        .control_phase_bytes = 1,
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
+    };
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &io_cfg, &io_handle));
+
+    lcd_init();
+}
+
+// Programa principal
 void app_main(void)
 {
-    i2c_master_init();
-    lcd_init();
+    lcd_begin();
 
-    lcd_print("Hola ESP-IDF!");  // Muestra texto en LCD
-    ESP_LOGI(TAG, "Mensaje enviado a LCD");
+    lcd_set_cursor(0, 0);
+    lcd_print("ESP-IDF LCD OK!");
+    lcd_set_cursor(0, 1);
+    lcd_print("Nueva API lista");
+
+    while (1)
+        vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
 ```
+### Comandos de LCD
+| Acción                | Código            | Descripción                       |
+| --------------------- | ----------------- | --------------------------------- |
+| `lcd_cmd(0x01)`       | Limpiar pantalla  | Borra todo el contenido del LCD   |
+| `lcd_cmd(0x0C)`       | Display ON        | Muestra texto sin cursor          |
+| `lcd_cmd(0x0E)`       | Cursor ON         | Muestra cursor parpadeante        |
+| `lcd_set_cursor(x,y)` | Posicionar cursor | x = columna, y = fila (0 o 1)     |
+| `lcd_print("texto")`  | Escribir texto    | Envía texto carácter por carácter |
+
 
 # PARTE IMPORTANTE FreeRTOS: Multitarea, Sensores y Deep Sleep
 
